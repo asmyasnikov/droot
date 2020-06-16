@@ -10,6 +10,7 @@ import (
 
 // DROOT_ENV_FILE_PATH is the file path of list of environment variables for `droot run`.
 const DROOT_ENV_FILE_PATH = "/.drootenv"
+const DROOT_ENTRY_FILE_PATH = "/.drootentry.sh"
 
 // GetEnvironFromEnvFile gets string slice of environment variables from the `filename`.
 func GetEnvironFromEnvFile(filename string) ([]string, error) {

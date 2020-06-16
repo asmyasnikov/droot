@@ -10,7 +10,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/pkg/errors"
-	"github.com/yuuki/droot/environ"
+	"github.com/asmyasnikov/droot/environ"
 	"golang.org/x/net/context" // docker/docker don't use 'context' as standard package.
 )
 
@@ -52,7 +52,7 @@ func (c *Client) ExportImage(imageID string) (io.ReadCloser, error) {
 	}
 
 	//Put drootenv file into the filesystem.
-	cmd := fmt.Sprintf("echo \"%s\" > %s", strings.Join(image.ContainerConfig.Env, "\n"), environ.DROOT_ENV_FILE_PATH)
+	cmd := fmt.Sprintf("echo \"%s\" > %s && echo \"%s\" > %s", strings.Join(image.ContainerConfig.Env, "\n"), environ.DROOT_ENV_FILE_PATH, strings.Join(image.Config.Entrypoint, " "), environ.DROOT_ENTRY_FILE_PATH)
 	container, err := c.docker.ContainerCreate(ctx, &container.Config{
 		Image:      imageID,
 		User:       "root",       // Avoid permission denied error

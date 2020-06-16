@@ -9,8 +9,8 @@ import (
 	"github.com/docker/docker/pkg/mount"
 	"github.com/pkg/errors"
 
-	"github.com/yuuki/droot/log"
-	"github.com/yuuki/droot/osutil"
+	"github.com/asmyasnikov/droot/log"
+	"github.com/asmyasnikov/droot/osutil"
 )
 
 type Mounter struct {

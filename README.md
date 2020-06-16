@@ -1,4 +1,4 @@
-droot  [![Latest Version](http://img.shields.io/github/release/yuuki/droot.svg?style=flat-square)](https://github.com/yuuki/droot/releases) [![Travis Build Status](https://travis-ci.org/yuuki/droot.svg?branch=master)](https://travis-ci.org/yuuki/droot) [![Go Report Card](https://goreportcard.com/badge/github.com/yuuki/droot)](https://goreportcard.com/report/github.com/yuuki/droot) [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
+droot  [![Latest Version](http://img.shields.io/github/release/yuuki/droot.svg?style=flat-square)](https://github.com/asmyasnikov/droot/releases) [![Travis Build Status](https://travis-ci.org/yuuki/droot.svg?branch=master)](https://travis-ci.org/yuuki/droot) [![Go Report Card](https://goreportcard.com/badge/github.com/asmyasnikov/droot)](https://goreportcard.com/report/github.com/asmyasnikov/droot) [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
 =====
 
 Droot is A simple chroot-based application container engine to build, ship, run with chroot instead of docker run. Droot aims to simply escape dependency hell.
@@ -27,11 +27,11 @@ $ brew install droot
 ```
 
 ### Download binary from GitHub Releases
-[Releases・yuuki/droot - GitHub](https://github.com/yuuki/droot/releases)
+[Releases・yuuki/droot - GitHub](https://github.com/asmyasnikov/droot/releases)
 
 ### Build from source
 ```bash
- $ go get github.com/yuuki/droot/cmd/droot
+ $ go get github.com/asmyasnikov/droot/cmd/droot
 ```
 
 ## Usage
@@ -90,7 +90,7 @@ $ ./script/build_in_container.sh make build
 
 ## Contribution
 
-1. Fork ([https://github.com/yuuki/droot/fork](https://github.com/yuuki/droot/fork))
+1. Fork ([https://github.com/asmyasnikov/droot/fork](https://github.com/asmyasnikov/droot/fork))
 1. Create a feature branch
 1. Commit your changes
 1. Rebase your local changes against the master branch

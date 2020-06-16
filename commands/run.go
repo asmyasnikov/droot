@@ -11,10 +11,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 
-	"github.com/yuuki/droot/environ"
-	"github.com/yuuki/droot/log"
-	"github.com/yuuki/droot/mounter"
-	"github.com/yuuki/droot/osutil"
+	"github.com/asmyasnikov/droot/environ"
+	"github.com/asmyasnikov/droot/log"
+	"github.com/asmyasnikov/droot/mounter"
+	"github.com/asmyasnikov/droot/osutil"
 )
 
 var CommandArgRun = "--root ROOT_DIR [--user USER] [--group GROUP] [--bind SRC-PATH[:DEST-PATH]] [--robind SRC-PATH[:DEST-PATH]] [--no-dropcaps] -- COMMAND"

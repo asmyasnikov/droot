@@ -7,7 +7,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 
-	"github.com/yuuki/droot/docker"
+	"github.com/asmyasnikov/droot/docker"
 )
 
 var CommandArgExport = "-o OUTPUT DOCKER_REPOSITORY[:TAG]"

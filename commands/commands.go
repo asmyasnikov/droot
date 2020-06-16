@@ -3,7 +3,7 @@ package commands
 import (
 	"github.com/urfave/cli"
 
-	"github.com/yuuki/droot/log"
+	"github.com/asmyasnikov/droot/log"
 )
 
 var Commands = []cli.Command{

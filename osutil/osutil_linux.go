@@ -10,7 +10,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/yuuki/droot/log"
+	"github.com/asmyasnikov/droot/log"
 )
 
 func LookupGroup(id string) (int, error) {

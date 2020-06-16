@@ -4,7 +4,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 
-	"github.com/yuuki/droot/mounter"
+	"github.com/asmyasnikov/droot/mounter"
 )
 
 var CommandArgUmount = "--root ROOT_DIR"
