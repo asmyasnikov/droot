@@ -16,7 +16,7 @@ import (
 	"github.com/asmyasnikov/droot/osutil"
 )
 
-var CommandArgRun = "--root ROOT_DIR [--user USER] [--group GROUP] [--bind SRC-PATH[:DEST-PATH]] [--robind SRC-PATH[:DEST-PATH]] [--no-dropcaps] -- COMMAND"
+var CommandArgRun = "--root ROOT_DIR [--user USER] [--group GROUP] [--bind SRC-PATH[:DEST-PATH][:ro]] [--no-dropcaps] -- COMMAND"
 var CommandRun = cli.Command{
 	Name:   "run",
 	Usage:  "Run command in container",
