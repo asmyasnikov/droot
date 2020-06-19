@@ -1,15 +1,19 @@
 package docker
 
 import (
+	"archive/tar"
 	"bytes"
+	"github.com/asmyasnikov/droot/environ"
+	"github.com/asmyasnikov/droot/mounter"
+	"github.com/asmyasnikov/droot/systemd"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/pkg/errors"
 	"golang.org/x/net/context" // docker/docker don't use 'context' as standard package.
 	"io"
-	"archive/tar"
 	"strings"
 )
 
@@ -40,27 +44,34 @@ func New() (*Client, error) {
 	return &Client{docker: cli}, nil
 }
 
-func (c *Client) Inspect(ctx context.Context, id string) (info *types.ContainerJSON, containerId2Stop *string, err error) {
+func (c *Client) Inspect(ctx context.Context, id string) (info *types.ContainerJSON, needStop bool, needRemove bool, err error) {
 	// check first existing container
 	inspect, err := c.docker.ContainerInspect(ctx, id)
 	if err == nil {
 		if inspect.State.Running {
-			return &inspect, nil, nil
+			return &inspect, false, false, nil
 		}
 		if err := c.docker.ContainerStart(ctx, inspect.ID, types.ContainerStartOptions{}); err != nil {
-			_ = c.Remove(ctx, inspect.ID)
-			return nil, nil, errors.Wrapf(err, "Failed to start container %s", inspect.ID)
+			return nil, false, false, errors.Wrapf(err, "Failed to start container %s", inspect.ID)
 		}
-		return &inspect, &inspect.ID, nil
+		return &inspect, true, false, nil
 	}
 	container, err := c.docker.ContainerCreate(ctx, &container.Config{
 		Image:      id,
 		User:       "root",       // Avoid permission denied error
 	}, nil, nil, "")
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "Failed to create container from image %s", id)
+		return nil, false, true, errors.Wrapf(err, "Failed to create container from image %s", id)
 	}
-	return c.Inspect(ctx, container.ID)
+	info, needStop, _, err = c.Inspect(ctx, container.ID)
+	return info, needStop, true, err
+}
+
+func (c *Client) Stop(ctx context.Context, containerID string) (error) {
+	if err := c.docker.ContainerStop(ctx, containerID, nil); err != nil {
+		return errors.Wrapf(err, "Failed to remove container %s", containerID)
+	}
+	return nil
 }
 
 func (c *Client) Remove(ctx context.Context, containerID string) (error) {
@@ -72,21 +83,18 @@ func (c *Client) Remove(ctx context.Context, containerID string) (error) {
 	return nil
 }
 
-const DROOT_ENV_FILE_PATH = ".drootenv"
-const DROOT_ENTRY_FILE_PATH = ".drootentry.sh"
-
-func (c *Client) writeFakeFile(w *tar.Writer, path string, body string) (error) {
+func (c *Client) writeFakeFile(w *tar.Writer, path string, body []byte, mode int) (error) {
 	return c.write(
 		w,
 		&tar.Header{
 			Uname:    "root",
 			Gname:    "root",
-			Mode:     int64(0777),
+			Mode:     int64(mode),
 			Name:     path,
 			Typeflag: tar.TypeReg,
 			Size:     int64(len(body)),
 		},
-		[]byte(body),
+		body,
 	)
 }
 
@@ -102,17 +110,64 @@ func (c *Client) write(w *tar.Writer, h *tar.Header, b []byte) (error) {
 
 
 // ExportImage exports a docker image into the archive of filesystem.
-// Save an environ of the docker image into `/.drootenv` to preserve it.
-func (c *Client) Export(ctx context.Context, containerID string, info *types.ContainerJSON) (io.ReadCloser, error) {
+func (c *Client) Export(ctx context.Context, containerID string, path *string, info *types.ContainerJSON) (io.ReadCloser, error) {
 	reader, writer := io.Pipe()
 	go func() {
 		w := tar.NewWriter(writer)
-		if err := c.writeFakeFile(w, DROOT_ENV_FILE_PATH, strings.Join(info.Config.Env, "\n")); err != nil {
+		if err := c.writeFakeFile(
+			w,
+			environ.DROOT_ENV_FILE_PATH,
+			[]byte(strings.Join(
+				info.Config.Env,
+				"\n",
+			) + "\n\n"),
+			0644,
+		); err != nil {
 			writer.CloseWithError(errors.Wrapf(err, "Failed to write envs"))
 			return
 		}
-		if err := c.writeFakeFile(w, DROOT_ENTRY_FILE_PATH, strings.Join(append(info.Config.Entrypoint, info.Config.Cmd...), " ")); err != nil {
-			writer.CloseWithError(errors.Wrapf(err, "Failed to write entrypoint"))
+		if path != nil {
+			b, err := systemd.Config(*path, info);
+			if err != nil {
+				writer.CloseWithError(errors.Wrapf(err, "Failed to compile systemd config"))
+				return
+			}
+			if err := c.writeFakeFile(
+				w,
+				systemd.DROOT_SYSTEMD_FILE_PATH,
+				b,
+				0644,
+			); err != nil {
+				writer.CloseWithError(errors.Wrapf(err, "Failed to write binds"))
+				return
+			}
+		}
+		if err := c.writeFakeFile(
+			w,
+			mounter.DROOT_BINDS_FILE_PATH,
+			[]byte(strings.Join(
+				func() (binds []string) {
+					for _, m := range info.Mounts {
+						if m.Type != mount.TypeBind {
+							continue
+						}
+						binds = append(
+							binds,
+							m.Source + ":" + m.Destination + func() string {
+								if m.RW {
+									return ""
+								}
+								return ":ro"
+							}(),
+						)
+					}
+					return binds
+				}(),
+				"\n",
+			) + "\n\n"),
+			0644,
+		); err != nil {
+			writer.CloseWithError(errors.Wrapf(err, "Failed to write binds"))
 			return
 		}
 		body, err := c.docker.ContainerExport(ctx, containerID)

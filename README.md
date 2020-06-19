@@ -39,6 +39,7 @@ $ brew install droot
 ```bash
 $ docker build -t dockerfiles/app
 $ droot export dockerfiles/app | gzip -cq | aws s3 cp - s3://drootexamples/app.tar.gz
+$ for ID in $(docker ps --format "{{.ID}}"); do droot export -o $(docker inspect $ID --format "{{.Config.Image}}") $ID; done;
 ```
 
 ```bash

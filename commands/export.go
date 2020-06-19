@@ -1,11 +1,14 @@
 package commands
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
 	"github.com/docker/docker/api/types/mount"
 	"io"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -15,14 +18,107 @@ import (
 	"github.com/asmyasnikov/droot/docker"
 )
 
-var CommandArgExport = "-o OUTPUT DOCKER_REPOSITORY[:TAG]"
+var CommandArgExport = "[-o {OUTPUT_DIRECTORY,OUTPUT_TAR_FILE}] [-s] {IMAGE[:TAG],CONTAINER}"
 var CommandExport = cli.Command{
 	Name:   "export",
 	Usage:  "Export a container's filesystem as a tar archive",
 	Action: fatalOnError(doExport),
 	Flags: []cli.Flag{
 		cli.StringFlag{Name: "o, output", Usage: "Write to a file, instead of STDOUT"},
+		cli.BoolFlag{Name: "s, systemd", Usage: "Write to STDERR systemd service config, instead plain run help"},
 	},
+}
+
+type OutType string
+
+const (
+	UNKNOWN OutType = "unknown"
+	TAR OutType = "tar"
+	PIPE OutType = "pipe"
+	DIR OutType = "dir"
+)
+
+func outType(output string) (OutType, error) {
+	if len(output) == 0 {
+		return PIPE, nil
+	}
+	info, err := os.Lstat(output);
+	if err != nil || info.Mode().IsRegular() {
+		if os.IsNotExist(err) {
+			err = nil
+		}
+		if strings.HasSuffix(output, ".tar") {
+			return TAR, err
+		} else {
+			return DIR, err
+		}
+	}
+	childs, err := ioutil.ReadDir(output);
+	if err != nil {
+		return UNKNOWN, fmt.Errorf("Cannot read output directory %s", output)
+	}
+	if len(childs) > 0 {
+		return DIR, fmt.Errorf("Output directory %s is not empty", output)
+	}
+	return DIR, nil
+}
+
+func read(reader io.Reader, output string) error {
+	oType, err := outType(output)
+	if err != nil {
+		return err
+	}
+	switch oType {
+	case PIPE:
+		if _, err := io.Copy(os.Stdout, reader); err != nil {
+			return err
+		}
+		return nil
+	case TAR:
+		file, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE, 0644)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		if _, err := io.Copy(file, reader); err != nil {
+			return err
+		}
+		return nil
+	case DIR:
+		if err := os.MkdirAll(output, 0755); err != nil {
+			return err
+		}
+		tr := tar.NewReader(reader)
+		for {
+			header, err := tr.Next()
+			switch {
+			case err == io.EOF:
+				return nil
+			case err != nil:
+				return err
+			case header == nil:
+				continue
+			}
+			target := filepath.Join(output, header.Name)
+			switch header.Typeflag {
+			case tar.TypeDir:
+				if err := os.MkdirAll(target, 0755); err != nil {
+					return err
+				}
+			case tar.TypeReg:
+				f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+				if err != nil {
+					return err
+				}
+				if _, err := io.Copy(f, tr); err != nil {
+					return err
+				}
+				f.Close()
+			}
+		}
+	default:
+		return fmt.Errorf("Not supported output format %s", oType)
+	}
 }
 
 func doExport(c *cli.Context) error {
@@ -35,15 +131,25 @@ func doExport(c *cli.Context) error {
 		cli.ShowCommandHelp(c, "export")
 		return errors.New("docker imageID/containerID required")
 	}
+	output := c.String("output")
+	oType, err := outType(output)
+	if err != nil {
+		return err
+	}
 	docker, err := docker.New()
 	if err != nil {
 		return err
 	}
 	ctx := context.Background()
-	info, containerID, err := docker.Inspect(ctx, id)
+	info, needStop, needRemove, err := docker.Inspect(ctx, id)
 	defer func() {
-		if containerID != nil {
-			docker.Remove(ctx, *containerID)
+		if info == nil {
+			return
+		}
+		if needRemove {
+			docker.Remove(ctx, info.ID)
+		} else if needStop {
+			docker.Stop(ctx, info.ID)
 		}
 	}()
 	if err != nil {
@@ -51,11 +157,15 @@ func doExport(c *cli.Context) error {
 	}
 	reader, err := docker.Export(
 		ctx,
-		func() string {
-			if containerID != nil {
-				return *containerID
+		info.ID,
+		func() *string {
+			if oType == DIR {
+				absPath, err := filepath.Abs(output)
+				if err == nil {
+					return &absPath
+				}
 			}
-			return info.ID
+			return nil
 		}(),
 		info,
 	)
@@ -63,18 +173,7 @@ func doExport(c *cli.Context) error {
 		return err
 	}
 	defer reader.Close()
-	writer := os.Stdout
-	if output := c.String("output"); output != "" {
-		file, err := os.Create(output)
-		if err != nil {
-			return err
-		}
-		writer = file
-	}
-	defer func() {
-		writer.Close()
-	}()
-	if _, err := io.Copy(writer, reader); err != nil {
+	if err := read(reader, output); err != nil {
 		return err
 	}
 	cmd := "\tdroot run [--cp]"
@@ -123,13 +222,8 @@ func doExport(c *cli.Context) error {
 		attentions += "\tcontainer have limit memory " + strconv.Itoa(int(info.ContainerJSONBase.HostConfig.Resources.Memory / 1024 / 1024)) + "MB\n"
 	}
 	cmd += " --root [container directory]"
-	cmd += " -- " + func(s string) string {
-		if len(s) == 0 {
-			return s
-		}
-		return "[" + s + "] -c "
-	}(strings.Join(info.Config.Shell, "|")) + "\"" + strings.Join(append(info.Config.Entrypoint, info.Config.Cmd...), " ") + "\"\n"
-	fmt.Fprintln(os.Stderr, "Run droot with command (save this for future use):\n")
+	cmd += " -- " + strings.Join(append(info.Config.Entrypoint, info.Config.Cmd...), " ") + "\n"
+	fmt.Fprintln(os.Stderr, "Run droot with command (save this for future use):")
 	fmt.Fprintln(os.Stderr, cmd)
 	if len(attentions) > 0 {
 		fmt.Fprintln(os.Stderr, "Attentions:\n", attentions)

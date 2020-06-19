@@ -2,11 +2,10 @@ package commands
 
 import (
 	"fmt"
-	"os"
-	fp "path/filepath"
-	"strings"
-
 	"golang.org/x/sys/unix"
+	"os"
+	"path"
+	fp "path/filepath"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -67,6 +66,11 @@ var keepCaps = map[uint]bool{
 }
 
 func doRun(c *cli.Context) error {
+	if len(c.StringSlice("robind")) > 0 {
+		cli.ShowCommandHelp(c, "run")
+		return errors.New("--robind depricated. use --bind HOST_DIR:CONTAINER_DIR[:ro]")
+	}
+
 	command := c.Args()
 	if len(command) < 1 {
 		cli.ShowCommandHelp(c, "run")
@@ -84,14 +88,9 @@ func doRun(c *cli.Context) error {
 		return err
 	}
 
-	// Check env format KEY=VALUE
-	env := c.StringSlice("env")
-	if len(env) > 0 {
-		for _, e := range env {
-			if len(strings.SplitN(e, "=", 2)) != 2 {
-				return errors.Errorf("Invalid env format: %s", e)
-			}
-		}
+	env, err := environ.Environ(c.StringSlice("env"), path.Join(rootDir, environ.DROOT_ENV_FILE_PATH))
+	if err != nil {
+		return err
 	}
 
 	uid, gid := os.Getuid(), os.Getgid()
@@ -126,23 +125,8 @@ func doRun(c *cli.Context) error {
 		return err
 	}
 
-	for _, val := range c.StringSlice("bind") {
-		hostDir, containerDir, err := parseBindOption(val)
-		if err != nil {
-			return err
-		}
-		if err := mnt.BindMount(hostDir, containerDir); err != nil {
-			return err
-		}
-	}
-	for _, val := range c.StringSlice("robind") {
-		hostDir, containerDir, err := parseBindOption(val)
-		if err != nil {
-			return err
-		}
-		if err := mnt.RoBindMount(hostDir, containerDir); err != nil {
-			return errors.Wrapf(err, "Failed to robind mount %s", val)
-		}
+	if err := mnt.BindMounts(c.StringSlice("bind"), path.Join(rootDir, mounter.DROOT_BINDS_FILE_PATH)); err != nil {
+		return err
 	}
 
 	// create symlinks
@@ -171,41 +155,9 @@ func doRun(c *cli.Context) error {
 		return fmt.Errorf("Failed to set user %d: %s", uid, err)
 	}
 
-	if osutil.ExistsFile(environ.DROOT_ENV_FILE_PATH) {
-		envFromFile, err := environ.GetEnvironFromEnvFile(environ.DROOT_ENV_FILE_PATH)
-		if err != nil {
-			return fmt.Errorf("Failed to read environ from '%s'", environ.DROOT_ENV_FILE_PATH)
-		}
-		env, err = environ.MergeEnviron(envFromFile, env)
-		if err != nil {
-			return fmt.Errorf("Failed to merge environ: %s", err)
-		}
-	}
 	return osutil.Execv(command[0], command[0:], env)
 }
 
-func parseBindOption(bindOption string) (string, string, error) {
-	var hostDir, containerDir string
-
-	d := strings.SplitN(bindOption, ":", 2)
-	if len(d) < 2 {
-		hostDir = d[0]
-	} else {
-		hostDir, containerDir = d[0], d[1]
-	}
-	if containerDir == "" {
-		containerDir = hostDir
-	}
-
-	if !fp.IsAbs(hostDir) {
-		return hostDir, containerDir, fmt.Errorf("%s is not an absolute path", hostDir)
-	}
-	if !fp.IsAbs(containerDir) {
-		return hostDir, containerDir, fmt.Errorf("%s is not an absolute path", containerDir)
-	}
-
-	return fp.Clean(hostDir), fp.Clean(containerDir), nil
-}
 
 func createDevices(rootDir string, uid, gid int) error {
 	nullDir := fp.Join(rootDir, os.DevNull)

@@ -1,6 +1,8 @@
 package mounter
 
 import (
+	"bufio"
+	"fmt"
 	"os"
 	fp "path/filepath"
 	"strings"
@@ -13,12 +15,39 @@ import (
 	"github.com/asmyasnikov/droot/osutil"
 )
 
+// DROOT_ENV_FILE_PATH is the file path of list of environment variables for `droot run`.
+const DROOT_BINDS_FILE_PATH = ".drootbinds"
+
 type Mounter struct {
 	rootDir string
 }
 
 func NewMounter(rootDir string) *Mounter {
 	return &Mounter{rootDir: rootDir}
+}
+
+func parseBindOption(bindOption string) (hostDir string, containerDir string, rw bool, err error) {
+	d := strings.SplitN(bindOption, ":", 3)
+	switch len(d) {
+	case 3:
+		hostDir, containerDir = d[0], d[1]
+		rw = strings.ToLower(d[2]) != "rw"
+	case 2:
+		hostDir, containerDir = d[0], d[1]
+		rw = true
+	case 1:
+		hostDir, containerDir = d[0], d[0]
+		rw = true
+	default:
+		return hostDir, containerDir, rw, fmt.Errorf("Unknown bind option '%s'", bindOption)
+	}
+	if !fp.IsAbs(hostDir) {
+		return hostDir, containerDir, rw, fmt.Errorf("%s is not an absolute path", hostDir)
+	}
+	if !fp.IsAbs(containerDir) {
+		return hostDir, containerDir, rw, fmt.Errorf("%s is not an absolute path", containerDir)
+	}
+	return fp.Clean(hostDir), fp.Clean(containerDir), rw, nil
 }
 
 func ResolveRootDir(dir string) (string, error) {
@@ -60,7 +89,50 @@ func (m *Mounter) MountSysProc() error {
 	return nil
 }
 
-func (m *Mounter) BindMount(hostDir, containerDir string) error {
+func containerBinds(path string) (binds []string, err error) {
+	if !osutil.ExistsFile(path) {
+		return binds, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		l := strings.Trim(scanner.Text(), " \n\t")
+		if len(l) == 0 {
+			continue
+		}
+		binds = append(binds, l)
+	}
+	return binds, nil
+}
+
+func (m *Mounter) BindMounts(bindOpts []string, path string) error {
+	binds, err := containerBinds(path)
+	if err != nil {
+		return err
+	}
+	for _, bindOption := range append(binds, bindOpts...) {
+		hostDir, containerDir, rw, err := parseBindOption(bindOption)
+		if err != nil {
+			return err
+		}
+		if rw {
+			if err := m.bindMount(hostDir, containerDir); err != nil {
+				return errors.Wrapf(err, "Failed to bind read-write mount point %s", bindOpts)
+			}
+		} else {
+			if err := m.roBindMount(hostDir, containerDir); err != nil {
+				return errors.Wrapf(err, "Failed to bind read-only mount point %s", bindOpts)
+			}
+		}
+	}
+	return nil
+}
+
+func (m *Mounter) bindMount(hostDir, containerDir string) error {
 	containerDir = fp.Join(m.rootDir, containerDir)
 
 	if ok := osutil.IsDirEmpty(hostDir); ok {
@@ -80,8 +152,8 @@ func (m *Mounter) BindMount(hostDir, containerDir string) error {
 	return nil
 }
 
-func (m *Mounter) RoBindMount(hostDir, containerDir string) error {
-	if err := m.BindMount(hostDir, containerDir); err != nil {
+func (m *Mounter) roBindMount(hostDir, containerDir string) error {
+	if err := m.bindMount(hostDir, containerDir); err != nil {
 		return err
 	}
 
@@ -94,7 +166,7 @@ func (m *Mounter) RoBindMount(hostDir, containerDir string) error {
 	return nil
 }
 
-func (m *Mounter) GetMountsRoot() ([]*mount.Info, error) {
+func (m *Mounter) getMountsRoot() ([]*mount.Info, error) {
 	mounts, err := mount.GetMounts()
 	if err != nil {
 		return nil, err
@@ -111,7 +183,7 @@ func (m *Mounter) GetMountsRoot() ([]*mount.Info, error) {
 }
 
 func (m *Mounter) UmountRoot() error {
-	mounts, err := m.GetMountsRoot()
+	mounts, err := m.getMountsRoot()
 	if err != nil {
 		return err
 	}

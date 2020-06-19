@@ -2,6 +2,7 @@ package environ
 
 import (
 	"bufio"
+	"github.com/asmyasnikov/droot/osutil"
 	"os"
 	"strings"
 
@@ -9,19 +10,28 @@ import (
 )
 
 // DROOT_ENV_FILE_PATH is the file path of list of environment variables for `droot run`.
-const DROOT_ENV_FILE_PATH = "/.drootenv"
-const DROOT_ENTRY_FILE_PATH = "/.drootentry.sh"
+const DROOT_ENV_FILE_PATH = ".drootenv"
 
-// GetEnvironFromEnvFile gets string slice of environment variables from the `filename`.
-func GetEnvironFromEnvFile(filename string) ([]string, error) {
-	f, err := os.Open(filename)
+func parseEnv(s string) (string, string, error) {
+	kv := strings.SplitN(s, "=", 2)
+	if len(kv) != 2 {
+		return "", "", errors.Errorf("Invalid env format: %s", s)
+	}
+	return kv[0], kv[1], nil
+}
+
+func containerEnvs(path string) (map[string]string, error) {
+	if !osutil.ExistsFile(path) {
+		return nil, nil
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	var env []string
 	scanner := bufio.NewScanner(f)
+	env := make(map[string]string)
 	for scanner.Scan() {
 		l := strings.Trim(scanner.Text(), " \n\t")
 		if len(l) == 0 {
@@ -30,41 +40,30 @@ func GetEnvironFromEnvFile(filename string) ([]string, error) {
 		if len(strings.Split(l, "=")) != 2 { // line should be `key=value`
 			continue
 		}
-		env = append(env, l)
+		k, v, err := parseEnv(l)
+		if err != nil {
+			return nil, err
+		}
+		env[k] = v
 	}
 
 	return env, nil
 }
 
-// MergeEnviron merges the two of string slice including environment variables. `dst` and `src` must be KEY=VALUE format.
-// If the items of `dst` and `src` has the same KEY, those of `src` overrides those of `dst`.
-func MergeEnviron(dst []string, src []string) ([]string, error) {
-	for _, s := range src {
-		kv := strings.SplitN(s, "=", 2)
-		if len(kv) != 2 {
-			return nil, errors.Errorf("Invalid env format: %s", s)
-		}
-		sk := kv[0]
-
-		copied := false
-
-		for i, d := range dst {
-			kv = strings.SplitN(d, "=", 2)
-			if len(kv) != 2 {
-				return nil, errors.Errorf("Invalid env format: %s", d)
-			}
-			dk := kv[0]
-			if sk == dk {
-				dst[i] = s
-				copied = true
-			}
-		}
-
-		if !copied {
-			dst = append(dst, s)
-			copied = false
-		}
+func Environ(e []string, path string) (env []string, err error) {
+	kv, err := containerEnvs(path)
+	if err != nil {
+		return nil, err
 	}
-
-	return dst, nil
+	for _, l := range e {
+		k, v, err := parseEnv(l)
+		if err != nil {
+			return nil, err
+		}
+		kv[k] = v
+	}
+	for k, v := range kv {
+		env = append(env, k + "=" + v)
+	}
+	return env, nil
 }
