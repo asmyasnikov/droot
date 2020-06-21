@@ -115,6 +115,16 @@ func read(reader io.Reader, output string) error {
 					return err
 				}
 				f.Close()
+			case tar.TypeLink:
+				err := os.Link(header.Linkname, target)
+				if err != nil {
+					return err
+				}
+			case tar.TypeSymlink:
+				err := os.Symlink(header.Linkname, target)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	default:
