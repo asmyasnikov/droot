@@ -189,12 +189,12 @@ func doExport(c *cli.Context) error {
 			attentions += "\tmount point " + m.Source + ":" + m.Destination + " is a " + string(m.Type) + "\n"
 			continue
 		}
-		cmd += func() string {
-			if m.RW {
-				return " --bind "
+		cmd += m.Source + ":" + m.Destination + func() string {
+			if !m.RW {
+				return ":ro"
 			}
-			return " --robind "
-		}() + m.Source + ":" + m.Destination
+			return ""
+		}()
 	}
 	for p, b := range info.HostConfig.PortBindings {
 		attentions += "\tcontainer port binding " + p.Port() + " -> [ " + func() string {
