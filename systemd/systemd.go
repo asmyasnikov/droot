@@ -3,6 +3,7 @@ package systemd
 import (
 	"bytes"
 	"github.com/docker/docker/api/types"
+	"os"
 	"strings"
 	"text/template"
 )
@@ -31,8 +32,12 @@ WantedBy=multi-user.target
 `
 
 func Config(root string, info *types.ContainerJSON) ([]byte, error) {
+	ex, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
 	buffer := &bytes.Buffer{}
-	err := template.Must(template.New("").Funcs(map[string]interface{}{
+	err = template.Must(template.New("").Funcs(map[string]interface{}{
 		"cmd": func(s string) string {
 			return `"` + strings.Replace(s, `"`, `\"`, -1) + `"`
 		},
@@ -55,13 +60,13 @@ func Config(root string, info *types.ContainerJSON) ([]byte, error) {
 		[]string{
 			"After=network.target",
 		},
-		"/usr/local/bin/droot run --cp --user " + func() string {
+		ex + " run --cp --user " + func() string {
 			if len(info.Config.User) > 0 {
 				return info.Config.User
 			}
 			return "root"
 		}() + " --root " + root + " -- \"" + strings.Join(append(info.Config.Entrypoint, info.Config.Cmd...), "\" \"") + "\"",
-		"/usr/local/bin/droot umount --root " + root,
+		ex + " umount --root " + root,
 		func() *string {
 			if len(info.Config.WorkingDir) > 0 {
 				return &info.Config.WorkingDir
