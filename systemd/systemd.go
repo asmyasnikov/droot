@@ -2,13 +2,14 @@ package systemd
 
 import (
 	"bytes"
+	"fmt"
+	"github.com/asmyasnikov/droot/osutil"
 	"github.com/docker/docker/api/types"
+	"github.com/pkg/errors"
 	"os"
 	"strings"
 	"text/template"
 )
-
-const DROOT_SYSTEMD_FILE_PATH = ".systemd.service"
 
 const systemdScript = `[Unit]
 Description={{.Description}}
@@ -31,7 +32,7 @@ ExecStopPost={{.ExecStopPost}}
 WantedBy=multi-user.target
 `
 
-func Config(root string, info *types.ContainerJSON) ([]byte, error) {
+func config(root string, info *types.ContainerJSON) ([]byte, error) {
 	ex, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -108,4 +109,23 @@ func Config(root string, info *types.ContainerJSON) ([]byte, error) {
 		return nil, err
 	}
 	return buffer.Bytes(), nil
+}
+
+func Install(path, name string, info *types.ContainerJSON) error {
+	configPath := "/lib/systemd/system/" + name + ".service"
+	if osutil.ExistsFile(configPath) {
+		return fmt.Errorf("Systemd service config %s already exists", config)
+	}
+	b, err := config(path, info);
+	if err != nil {
+		return errors.Wrapf(err, "Failed to compile systemd config")
+	}
+	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to create systemd config file")
+	}
+	if _, err := file.Write(b); err != nil {
+		return errors.Wrapf(err, "Failed to write systemd config file")
+	}
+	return nil
 }

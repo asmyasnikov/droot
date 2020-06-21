@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"context"
 	"fmt"
+	"github.com/asmyasnikov/droot/systemd"
 	"github.com/docker/docker/api/types/mount"
 	"io"
 	"io/ioutil"
@@ -18,14 +19,14 @@ import (
 	"github.com/asmyasnikov/droot/docker"
 )
 
-var CommandArgExport = "[-o {OUTPUT_DIRECTORY,OUTPUT_TAR_FILE}] [-s] {IMAGE[:TAG],CONTAINER}"
+var CommandArgExport = "[-o {OUTPUT_DIRECTORY,OUTPUT_TAR_FILE}] [-i SYSTEMD_SERVICE_NAME] {IMAGE[:TAG],CONTAINER}"
 var CommandExport = cli.Command{
 	Name:   "export",
-	Usage:  "Export a container's filesystem as a tar archive",
+	Usage:  "Export a container's filesystem as a tar archive or directory",
 	Action: fatalOnError(doExport),
 	Flags: []cli.Flag{
 		cli.StringFlag{Name: "o, output", Usage: "Write to a file, instead of STDOUT"},
-		cli.BoolFlag{Name: "s, systemd", Usage: "Write to STDERR systemd service config, instead plain run help"},
+		cli.StringFlag{Name: "i, install", Usage: "Install container as systemd service (if output is a directory)"},
 	},
 }
 
@@ -102,11 +103,11 @@ func read(reader io.Reader, output string) error {
 			target := filepath.Join(output, header.Name)
 			switch header.Typeflag {
 			case tar.TypeDir:
-				if err := os.MkdirAll(target, 0755); err != nil {
+				if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
 					return err
 				}
 			case tar.TypeReg:
-				f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+				f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, os.FileMode(header.Mode))
 				if err != nil {
 					return err
 				}
@@ -158,15 +159,6 @@ func doExport(c *cli.Context) error {
 	reader, err := docker.Export(
 		ctx,
 		info.ID,
-		func() *string {
-			if oType == DIR {
-				absPath, err := filepath.Abs(output)
-				if err == nil {
-					return &absPath
-				}
-			}
-			return nil
-		}(),
 		info,
 	)
 	if err != nil {
@@ -175,6 +167,13 @@ func doExport(c *cli.Context) error {
 	defer reader.Close()
 	if err := read(reader, output); err != nil {
 		return err
+	}
+	if oType == DIR && c.IsSet("install") {
+		absPath, err := filepath.Abs(output)
+		if err != nil {
+			return err
+		}
+		systemd.Install(absPath, c.String("install"), info)
 	}
 	cmd := "\tdroot run [--cp]"
 	if len(info.Config.User) > 0 {
@@ -207,6 +206,9 @@ func doExport(c *cli.Context) error {
 		}() + " ]\n"
 	}
 	for _, n := range info.NetworkSettings.Networks {
+		if len(n.IPAddress) == 0 {
+			continue
+		}
 		attentions += "\tcontainer have address " + n.IPAddress + " with network gateway " + n.Gateway + "\n"
 	}
 	if len(info.Config.WorkingDir) > 0 {
@@ -221,7 +223,16 @@ func doExport(c *cli.Context) error {
 	if info.ContainerJSONBase.HostConfig.Resources.Memory > 0 {
 		attentions += "\tcontainer have limit memory " + strconv.Itoa(int(info.ContainerJSONBase.HostConfig.Resources.Memory / 1024 / 1024)) + "MB\n"
 	}
-	cmd += " --root [container directory]"
+	cmd += " --root " + func() string {
+		if oType == DIR {
+			absPath, err := filepath.Abs(output)
+			if err != nil {
+				return "[container directory]"
+			}
+			return absPath
+		}
+		return "[container directory]"
+	}()
 	cmd += " -- " + strings.Join(append(info.Config.Entrypoint, info.Config.Cmd...), " ") + "\n"
 	fmt.Fprintln(os.Stderr, "Run droot with command (save this for future use):")
 	fmt.Fprintln(os.Stderr, cmd)

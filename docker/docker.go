@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"github.com/asmyasnikov/droot/environ"
 	"github.com/asmyasnikov/droot/mounter"
-	"github.com/asmyasnikov/droot/systemd"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
@@ -110,7 +109,7 @@ func (c *Client) write(w *tar.Writer, h *tar.Header, b []byte) (error) {
 
 
 // ExportImage exports a docker image into the archive of filesystem.
-func (c *Client) Export(ctx context.Context, containerID string, path *string, info *types.ContainerJSON) (io.ReadCloser, error) {
+func (c *Client) Export(ctx context.Context, containerID string, info *types.ContainerJSON) (io.ReadCloser, error) {
 	reader, writer := io.Pipe()
 	go func() {
 		w := tar.NewWriter(writer)
@@ -125,22 +124,6 @@ func (c *Client) Export(ctx context.Context, containerID string, path *string, i
 		); err != nil {
 			writer.CloseWithError(errors.Wrapf(err, "Failed to write envs"))
 			return
-		}
-		if path != nil {
-			b, err := systemd.Config(*path, info);
-			if err != nil {
-				writer.CloseWithError(errors.Wrapf(err, "Failed to compile systemd config"))
-				return
-			}
-			if err := c.writeFakeFile(
-				w,
-				systemd.DROOT_SYSTEMD_FILE_PATH,
-				b,
-				0644,
-			); err != nil {
-				writer.CloseWithError(errors.Wrapf(err, "Failed to write binds"))
-				return
-			}
 		}
 		if err := c.writeFakeFile(
 			w,
